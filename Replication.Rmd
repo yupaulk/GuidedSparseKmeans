@@ -9,7 +9,125 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Do this once (set eval to TRUE only once)
+# Exploratory data analysis
+
+## Do this once (set eval to TRUE only once)
+
+```{r eda install, eval=FALSE}
+# Install required libraries if not already installed
+if (!requireNamespace("pheatmap", quietly = TRUE)) install.packages("pheatmap")
+if (!requireNamespace("ggplot2", quietly = TRUE)) install.packages("ggplot2")
+```
+
+# Simulate data
+
+```{r}
+n <- 100 ## number of subjects
+g <- 5000 ## number of gene features
+set.seed(123)
+epxression <- matrix(rnorm(n*g), nrow=g, ncol=n) ## briefly simulate gene expression data
+outcome <- matrix(rnorm(n), nrow=n, ncol=1) ## simulate a continuous outcome variable
+
+# Add generic row and column names
+rownames(epxression) <- paste0("Gene", seq_len(g))  # Generic gene names
+colnames(epxression) <- paste0("Subject", seq_len(n))  # Generic subject names
+
+rownames(outcome) <- paste0("Subject", seq_len(n))  # Generic subject names
+colnames(outcome) <- paste0("Outcome", seq_len(1))  # Generic outcome names
+
+# Verify the structure of the matrix
+str(epxression)
+str(outcome)
+
+```
+
+# Summary of the dataset
+
+Get summary of gene expression data
+
+```{r}
+summary(epxression)
+```
+
+Get summary of outcome data
+
+```{r}
+summary(outcome)
+```
+
+Check for missing values
+
+```{r}
+sum(is.na(epxression))
+sum(is.na(outcome))
+```
+
+# Distribution of the dataset
+
+Get distribution of gene expression data
+
+```{r}
+library(reshape2)
+library(ggplot2)
+
+df <- melt(epxression)
+
+p <- ggplot(df, aes(x = value)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Density of Gene Expression", x = "Expression Level", y = "Density") +
+  theme_minimal()
+
+print(p)
+```
+
+Get distribution of outcome data
+
+```{r}
+df <- as.data.frame(outcome)
+
+p <- ggplot(df, aes(x = outcome)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Density of Outcome", x = "Outcome", y = "Density") +
+  theme_minimal()
+
+print(p)
+```
+
+# Correlation analysis
+
+```{r}
+library(pheatmap)
+
+# Compute correlations
+cor_matrix <- cor(epxression, use = "pairwise.complete.obs")
+
+# Visualize correlations as a heatmap
+pheatmap(cor_matrix, 
+         clustering_distance_rows = "correlation", 
+         clustering_distance_cols = "correlation",
+         main = "Correlation Heatmap of Genes")
+
+```
+
+# Heatmap of Gene Expression
+
+```{r}
+# Scale the data (row-wise)
+scaled_epxr <- t(scale(t(epxression)))
+
+# Plot the heatmap
+pheatmap(scaled_epxr, 
+         show_rownames = TRUE, 
+         show_colnames = TRUE, 
+         cluster_rows = TRUE, 
+         cluster_cols = TRUE, 
+         main = "Heatmap of Gene Expression")
+
+```
+
+# Replication
+
+## Do this once (set eval to TRUE only once)
 
 ```{r install, eval=FALSE}
 install.packages("devtools")
@@ -23,17 +141,8 @@ install_github("LingsongMeng/GuidedSparseKmeans")
 
 ```
 
-#Replication
-
 ```{r}
 library(GuidedSparseKmeans)
-
-n <- 100 ## number of subjects
-g <- 5000 ## number of gene features
-set.seed(123)
-epxression <- matrix(rnorm(n*g), nrow=g, ncol=n) ## briefly simulate gene expression data
-outcome <- rnorm(n) ## simulate a continuous outcome variable
-
 
 # Estimate tuning parameter K and lambda
 KLam <- GuidedSparseKmeans.KLam(x=t(epxression), z=outcome, pre.K = NULL, s.one=10, model="linear", nstart = 20, maxiter = 15, silence = F)
@@ -56,5 +165,56 @@ s <- GuidedSparseKmeans.S.R2out(x=t(epxression), R2.per=R2, K=3, s=c(8:12), lam=
 
 # Obtain gene selection and clustering results
 results <- GuidedSparseKmeans.R2out(x=t(epxression), R2.per=R2, K=3, s=10, lam=1, nstart=20, maxiter=15)
+
+```
+
+# Heatmap of clustered gene expression data
+
+```{r}
+# Assign cluster IDs to subjects
+subj_clusters <- data.frame(
+  Subject = colnames(scaled_epxr), # Subject names
+  Cluster = results[[1]]$clusters  # Corresponding cluster IDs
+)
+
+# View the mapping
+head(subj_clusters)
+
+# Create a column annotation for clusters
+annotation_col <- data.frame(
+  Cluster = factor(results[[1]]$clusters)  # Convert cluster IDs to factors
+)
+
+rownames(annotation_col) <- colnames(scaled_epxr)  # Set rownames to subject names
+
+# Order the matrix by clusters
+sorted_indices <- order(annotation_col$Cluster)
+epxr_sorted <- scaled_epxr[, sorted_indices]
+
+# Update the annotation to match the sorted order
+annotation_col <- annotation_col[sorted_indices, , drop = FALSE]
+
+# Calculate row means (or other statistics like row median)
+row_means <- rowMeans(epxr_sorted)
+
+# Sort the row indices based on row means
+sorted_indices <- order(row_means, decreasing = TRUE)
+
+# Reorder the expression matrix based on sorted indices
+epxr_sorted <- epxr_sorted[sorted_indices, ]
+
+color_palette <- colorRampPalette(c("green", "red"))(100)
+breaks <- seq(-4, 4, length.out = 101)
+
+# Generate heatmap with annotation
+pheatmap(epxr_sorted, 
+         cluster_cols = FALSE,
+         cluster_rows = FALSE,
+         show_rownames = FALSE,
+         show_colnames = FALSE,
+         color = color_palette,
+         breaks = breaks,
+         annotation_col = annotation_col,  # Add column annotations
+         main = "Heatmap with Gene Clusters")
 
 ```
